@@ -1,0 +1,5 @@
+{
+  "name": "Copy of OmniStudy: Autonomous Planning Agent",
+  "description": "An intelligent study agent that takes your syllabus and deadlines to create a dynamic, self-adjusting study schedule using Gemini 3 Pro.",
+  "requestFramePermissions": []
+}
