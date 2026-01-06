@@ -1,122 +1,164 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { StudyPlan, UserConstraints, StudyTask, TaskStatus } from "../types";
+import { StudyPlanOS, UserConstraints } from "../types";
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
 const MODEL_NAME = 'gemini-3-pro-preview';
 
-const planSchema = {
+const SYSTEM_PROMPT = `
+You are StudyPlanOS, an autonomous study planning agent. You are NOT a chatbot.
+Your job is to produce and maintain an evolving multi-week study plan based on a syllabus, deadlines, and available study hours.
+
+CRITICAL DATE ALIGNMENT:
+- The first day of "Week 1" MUST be the exact 'startDate' provided by the user. 
+- You must populate sessions starting from that day forward. Do not skip days unless the user's availability details specify it.
+- If there is work to be done, it should start immediately in Week 1.
+
+Core behavior:
+- You make planning decisions proactively.
+- You output structured plans and updates in JSON format.
+- You detect overload/backlog and automatically rebalance future sessions.
+- You always explain why changes were made in a concise decision log.
+
+Planning principles:
+1) Respect hard deadlines.
+2) distributed practice over cramming.
+3) Avoid cognitive overload (max 2 high-difficulty tasks back-to-back).
+4) When a task is "missed", move it to a future session or mark it as "rescheduled" and adjust the remaining plan to fit.
+`;
+
+const responseSchema = {
   type: Type.OBJECT,
   properties: {
-    tasks: {
+    plan_horizon_weeks: { type: Type.NUMBER },
+    assumptions: { type: Type.ARRAY, items: { type: Type.STRING } },
+    backlog_hours: { type: Type.NUMBER },
+    overload_flags: {
       type: Type.ARRAY,
       items: {
         type: Type.OBJECT,
         properties: {
-          id: { type: Type.STRING },
-          topic: { type: Type.STRING },
-          description: { type: Type.STRING },
-          durationHours: { type: Type.NUMBER },
-          priority: { type: Type.STRING, enum: ['High', 'Medium', 'Low'] },
-          week: { type: Type.INTEGER },
-          day: { type: Type.INTEGER },
-          status: { type: Type.STRING, enum: ['PENDING'] }
-        },
-        required: ['id', 'topic', 'durationHours', 'week', 'day', 'status']
+          week_start: { type: Type.STRING },
+          reason: { type: Type.STRING },
+          hours_scheduled: { type: Type.NUMBER },
+          hours_available: { type: Type.NUMBER }
+        }
       }
     },
-    agentRational: {
-      type: Type.STRING,
-      description: "Explanation of why this plan was structured this way."
-    }
-  },
-  required: ['tasks', 'agentRational']
+    study_plan: {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          week_start: { type: Type.STRING },
+          week_goals: { type: Type.ARRAY, items: { type: Type.STRING } },
+          sessions: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                date: { type: Type.STRING },
+                time_block_label: { type: Type.STRING },
+                planned_minutes: { type: Type.NUMBER },
+                tasks: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      task_id: { type: Type.STRING },
+                      title: { type: Type.STRING },
+                      course: { type: Type.STRING },
+                      type: { type: Type.STRING, enum: ["reading", "problem_set", "project", "review", "practice_exam", "admin"] },
+                      deliverable: { type: Type.STRING },
+                      est_minutes: { type: Type.NUMBER },
+                      difficulty_1to5: { type: Type.NUMBER },
+                      priority_1to5: { type: Type.NUMBER },
+                      deadline: { type: Type.STRING, nullable: true },
+                      status: { type: Type.STRING, enum: ["planned", "completed", "missed", "rescheduled", "dropped"] },
+                      depends_on: { type: Type.ARRAY, items: { type: Type.STRING } }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    updates: {
+      type: Type.OBJECT,
+      properties: {
+        completed_task_ids: { type: Type.ARRAY, items: { type: Type.STRING } },
+        missed_task_ids: { type: Type.ARRAY, items: { type: Type.STRING } },
+        rescheduled_task_ids: { type: Type.ARRAY, items: { type: Type.STRING } },
+        dropped_task_ids: { type: Type.ARRAY, items: { type: Type.STRING } }
+      }
+    },
+    decision_log: {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          date: { type: Type.STRING },
+          triggers: { type: Type.ARRAY, items: { type: Type.STRING } },
+          changes: { type: Type.ARRAY, items: { type: Type.STRING } },
+          why: { type: Type.ARRAY, items: { type: Type.STRING } },
+          tradeoffs: { type: Type.ARRAY, items: { type: Type.STRING } }
+        }
+      }
+    },
+    next_actions: { type: Type.ARRAY, items: { type: Type.STRING } }
+  }
 };
 
-export async function generateInitialPlan(constraints: UserConstraints): Promise<StudyPlan> {
+export async function generateInitialPlan(constraints: UserConstraints): Promise<StudyPlanOS> {
   const prompt = `
-    Act as a professional academic success agent. 
-    Analyze the following syllabus and constraints to create a detailed multi-week study plan.
-    
-    SYLLABUS:
-    ${constraints.syllabus}
-    
-    CONSTRAINTS:
-    - Start Date: ${constraints.startDate}
-    - Final Deadline: ${constraints.deadlineDate}
-    - Study Capacity: ${constraints.hoursPerWeek} hours per week.
-    
-    Rules:
-    1. Break the syllabus into logical study blocks (tasks).
-    2. Assign each task a specific week and day (1-7).
-    3. Ensure the total hours per week do not significantly exceed the user's capacity.
-    4. Prioritize difficult topics early.
-    5. Each task must have a unique ID.
+    INITIAL PLAN REQUEST:
+    SYLLABUS: ${constraints.syllabus}
+    START DATE: ${constraints.startDate} (WEEK 1 MUST START HERE)
+    DEADLINES: Target completion by ${constraints.deadlineDate}
+    AVAILABILITY: Total ${constraints.hoursPerWeek} hours/week.
+    ${constraints.availabilityDetails || ''}
   `;
 
   const response = await ai.models.generateContent({
     model: MODEL_NAME,
     contents: prompt,
     config: {
+      systemInstruction: SYSTEM_PROMPT,
       responseMimeType: "application/json",
-      responseSchema: planSchema,
-      thinkingConfig: { thinkingBudget: 2000 }
+      responseSchema: responseSchema,
+      thinkingConfig: { thinkingBudget: 4000 }
     },
   });
 
   return JSON.parse(response.text);
 }
 
-export async function rebalancePlan(
-  currentPlan: StudyPlan, 
-  constraints: UserConstraints, 
-  currentWeek: number
-): Promise<StudyPlan> {
-  const completedTasks = currentPlan.tasks.filter(t => t.status === TaskStatus.COMPLETED);
-  const missedTasks = currentPlan.tasks.filter(t => t.status === TaskStatus.MISSED);
-  const pendingTasks = currentPlan.tasks.filter(t => t.status === TaskStatus.PENDING);
-
+export async function rebalancePlanOS(
+  currentPlan: StudyPlanOS, 
+  constraints: UserConstraints
+): Promise<StudyPlanOS> {
   const prompt = `
-    Act as an autonomous rebalancing agent. 
-    The user has a study plan, but some tasks were missed or the schedule needs adjustment.
+    REBALANCE REQUEST:
+    CURRENT STATE: ${JSON.stringify(currentPlan)}
+    CONSTRAINTS: ${JSON.stringify(constraints)}
     
-    CURRENT STATE:
-    - Current Week: ${currentWeek}
-    - Completed Tasks: ${completedTasks.length}
-    - Missed Tasks: ${missedTasks.length}
-    - Remaining Tasks: ${pendingTasks.length}
-    - User Capacity: ${constraints.hoursPerWeek} hours/week
-    
-    SYLLABUS CONTEXT:
-    ${constraints.syllabus}
-
-    OBJECTIVE:
-    1. Move missed tasks into future slots.
-    2. If the user is overloaded (too many tasks in future weeks), prioritize high-value syllabus items and consolidate minor ones.
-    3. Recalculate the schedule for all tasks from Week ${currentWeek} onwards.
-    4. Provide a clear "agentRational" explaining what you changed and why (e.g., 'Compacted Week 4 to accommodate missed calculus units from Week 2').
-    
-    DATA:
-    ${JSON.stringify(pendingTasks.concat(missedTasks))}
+    ACTION:
+    Analyze status updates. Any tasks marked "missed" should be moved to the next available session or tomorrow.
+    Update the decision log to explain how you moved the missed tasks.
   `;
 
   const response = await ai.models.generateContent({
     model: MODEL_NAME,
     contents: prompt,
     config: {
+      systemInstruction: SYSTEM_PROMPT,
       responseMimeType: "application/json",
-      responseSchema: planSchema,
+      responseSchema: responseSchema,
       thinkingConfig: { thinkingBudget: 4000 }
     },
   });
 
-  // Merge the updated future tasks with the already completed history
-  const updatedResult: StudyPlan = JSON.parse(response.text);
-  return {
-    agentRational: updatedResult.agentRational,
-    tasks: [
-      ...completedTasks,
-      ...updatedResult.tasks.map(t => ({ ...t, status: t.status || TaskStatus.PENDING }))
-    ]
-  };
+  return JSON.parse(response.text);
 }

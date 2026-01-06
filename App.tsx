@@ -1,17 +1,16 @@
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Layout } from './components/Layout';
 import { SetupView } from './components/SetupView';
 import { PlanDashboard } from './components/PlanDashboard';
-import { StudyPlan, UserConstraints, TaskStatus, RebalanceLog } from './types';
-import { generateInitialPlan, rebalancePlan } from './services/geminiService';
+import { StudyPlanOS, UserConstraints, TaskStatus, StudyTask } from './types';
+import { generateInitialPlan, rebalancePlanOS } from './services/geminiService';
 
 const App: React.FC = () => {
   const [isInitializing, setIsInitializing] = useState(false);
   const [isRebalancing, setIsRebalancing] = useState(false);
-  const [plan, setPlan] = useState<StudyPlan | null>(null);
+  const [plan, setPlan] = useState<StudyPlanOS | null>(null);
   const [constraints, setConstraints] = useState<UserConstraints | null>(null);
-  const [logs, setLogs] = useState<RebalanceLog[]>([]);
 
   const handleGeneratePlan = async (userConstraints: UserConstraints) => {
     setIsInitializing(true);
@@ -19,13 +18,6 @@ const App: React.FC = () => {
       const generated = await generateInitialPlan(userConstraints);
       setPlan(generated);
       setConstraints(userConstraints);
-      setLogs([{
-        id: crypto.randomUUID(),
-        timestamp: Date.now(),
-        reason: generated.agentRational || "Initial course mapping completed.",
-        previousTaskCount: 0,
-        newTaskCount: generated.tasks.length
-      }]);
     } catch (error) {
       console.error("Failed to generate plan:", error);
       alert("Error generating plan. Check API Key or try again.");
@@ -34,39 +26,74 @@ const App: React.FC = () => {
     }
   };
 
-  const handleUpdateStatus = (taskId: string, newStatus: TaskStatus) => {
-    if (!plan) return;
-    setPlan({
-      ...plan,
-      tasks: plan.tasks.map(t => t.id === taskId ? { ...t, status: newStatus } : t)
-    });
+  const handleUpdateStatus = async (taskId: string, newStatus: TaskStatus) => {
+    if (!plan || !plan.study_plan) return;
+    
+    const newPlan = { ...plan };
+    newPlan.study_plan = newPlan.study_plan.map(week => ({
+      ...week,
+      sessions: (week.sessions || []).map(session => ({
+        ...session,
+        tasks: (session.tasks || []).map(task => 
+          task.task_id === taskId ? { ...task, status: newStatus } : task
+        )
+      }))
+    }));
+
+    setPlan(newPlan);
+    if (newStatus === 'missed') {
+      handleRebalance(newPlan);
+    }
   };
 
-  const handleRebalance = async () => {
-    if (!plan || !constraints || isRebalancing) return;
+  const handleUpdateTask = (updatedTask: StudyTask) => {
+    if (!plan) return;
+    const newPlan = { ...plan };
+    newPlan.study_plan = newPlan.study_plan.map(week => ({
+      ...week,
+      sessions: (week.sessions || []).map(session => ({
+        ...session,
+        tasks: (session.tasks || []).map(task => 
+          task.task_id === updatedTask.task_id ? updatedTask : task
+        )
+      }))
+    }));
+    setPlan(newPlan);
+  };
+
+  const handleDeleteTask = (taskId: string) => {
+    if (!plan) return;
+    const newPlan = { ...plan };
+    newPlan.study_plan = newPlan.study_plan.map(week => ({
+      ...week,
+      sessions: (week.sessions || []).map(session => ({
+        ...session,
+        tasks: (session.tasks || []).filter(task => task.task_id !== taskId)
+      }))
+    }));
+    setPlan(newPlan);
+  };
+
+  const handleAddTask = (weekIndex: number, sessionIndex: number, newTask: StudyTask) => {
+    if (!plan) return;
+    const newPlan = { ...plan };
+    const week = newPlan.study_plan[weekIndex];
+    if (week && week.sessions[sessionIndex]) {
+      week.sessions[sessionIndex].tasks = [...(week.sessions[sessionIndex].tasks || []), newTask];
+      setPlan({ ...newPlan });
+    }
+  };
+
+  const handleRebalance = async (currentPlanOverride?: StudyPlanOS) => {
+    const targetPlan = currentPlanOverride || plan;
+    if (!targetPlan || !constraints || isRebalancing) return;
     
     setIsRebalancing(true);
     try {
-      // Logic: Determine current week based on date
-      const start = new Date(constraints.startDate);
-      const now = new Date();
-      const diffTime = Math.abs(now.getTime() - start.getTime());
-      const currentWeek = Math.ceil(diffTime / (1000 * 60 * 60 * 24 * 7)) || 1;
-
-      const rebalanced = await rebalancePlan(plan, constraints, currentWeek);
-      
-      setLogs(prev => [{
-        id: crypto.randomUUID(),
-        timestamp: Date.now(),
-        reason: rebalanced.agentRational || "Agent adjusted future schedule to maintain compliance.",
-        previousTaskCount: plan.tasks.length,
-        newTaskCount: rebalanced.tasks.length
-      }, ...prev]);
-
+      const rebalanced = await rebalancePlanOS(targetPlan, constraints);
       setPlan(rebalanced);
     } catch (error) {
       console.error("Rebalance failed:", error);
-      alert("Rebalancing failed. The agent hit a wall!");
     } finally {
       setIsRebalancing(false);
     }
@@ -79,10 +106,11 @@ const App: React.FC = () => {
       ) : (
         <PlanDashboard 
           plan={plan} 
-          constraints={constraints!} 
-          logs={logs}
           onUpdateStatus={handleUpdateStatus}
-          onRebalance={handleRebalance}
+          onUpdateTask={handleUpdateTask}
+          onDeleteTask={handleDeleteTask}
+          onAddTask={handleAddTask}
+          onRebalance={() => handleRebalance()}
           isRebalancing={isRebalancing}
         />
       )}
