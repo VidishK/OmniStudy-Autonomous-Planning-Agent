@@ -14,11 +14,15 @@ export interface StudyTask {
   deadline: string | null;
   status: TaskStatus;
   depends_on: string[];
+  reasoning?: string; 
+  why_scheduled_here?: string;
 }
 
 export interface StudySession {
   date: string;
   time_block_label: string;
+  start_time: string; 
+  end_time: string;   
   planned_minutes: number;
   tasks: StudyTask[];
 }
@@ -29,11 +33,20 @@ export interface StudyWeek {
   sessions: StudySession[];
 }
 
-export interface OverloadFlag {
-  week_start: string;
-  reason: string;
-  hours_scheduled: number;
-  hours_available: number;
+export interface StudyPlanOS {
+  label?: string; 
+  option_name?: string; // Matching the new prompt schema
+  description?: string;
+  plan_horizon_weeks: number;
+  study_plan: StudyWeek[];
+  system_warning?: string; 
+}
+
+export interface BacklogTask {
+  task_id: string;
+  title: string;
+  missed_date: string;
+  est_minutes: number;
 }
 
 export interface DecisionEntry {
@@ -44,26 +57,30 @@ export interface DecisionEntry {
   tradeoffs: string[];
 }
 
-export interface StudyPlanOS {
+export interface StudyPlanResponse {
   plan_horizon_weeks: number;
   assumptions: string[];
   backlog_hours: number;
-  overload_flags: OverloadFlag[];
-  study_plan: StudyWeek[];
-  updates: {
-    completed_task_ids: string[];
-    missed_task_ids: string[];
-    rescheduled_task_ids: string[];
-    dropped_task_ids: string[];
-  };
+  health_status: "green" | "yellow" | "red";
+  health_reason: string;
+  schedule_options: StudyPlanOS[];
+  backlog_tasks: BacklogTask[];
   decision_log: DecisionEntry[];
   next_actions: string[];
 }
 
 export interface UserConstraints {
-  syllabus: string;
+  weeklyTopics: string;
+  readings: string;
+  assignments: string;
+  examsGrading: string;
+  importantDates: string;
+  policies: string;
+  studentPreferences: string;
+  fixedCommitments: string; 
+  preferredFocusHours: string; 
+  allowOverride: boolean; 
   hoursPerWeek: number;
   deadlineDate: string;
   startDate: string;
-  availabilityDetails?: string;
 }
