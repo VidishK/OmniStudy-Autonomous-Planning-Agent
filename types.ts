@@ -34,12 +34,10 @@ export interface StudyWeek {
 }
 
 export interface StudyPlanOS {
-  label?: string; 
-  option_name?: string; // Matching the new prompt schema
-  description?: string;
-  plan_horizon_weeks: number;
+  option_name: string;
+  rationale: string; // The "Why" for this specific strategy
+  pedagogical_efficiency: number; // 0-100 score
   study_plan: StudyWeek[];
-  system_warning?: string; 
 }
 
 export interface BacklogTask {
@@ -47,14 +45,6 @@ export interface BacklogTask {
   title: string;
   missed_date: string;
   est_minutes: number;
-}
-
-export interface DecisionEntry {
-  date: string;
-  triggers: string[];
-  changes: string[];
-  why: string[];
-  tradeoffs: string[];
 }
 
 export interface StudyPlanResponse {
@@ -65,7 +55,6 @@ export interface StudyPlanResponse {
   health_reason: string;
   schedule_options: StudyPlanOS[];
   backlog_tasks: BacklogTask[];
-  decision_log: DecisionEntry[];
   next_actions: string[];
 }
 
@@ -84,3 +73,4 @@ export interface UserConstraints {
   deadlineDate: string;
   startDate: string;
 }
+
