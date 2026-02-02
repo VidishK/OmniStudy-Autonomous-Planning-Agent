@@ -3,22 +3,33 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { StudyPlanResponse, UserConstraints } from "../types";
 
 const MODEL_NAME = 'gemini-3-pro-preview';
+const EXTRACTION_MODEL = 'gemini-3-flash-preview';
+
+function getAIClient() {
+  const apiKey = process.env.API_KEY;
+  if (!apiKey || apiKey === 'undefined' || apiKey.length < 10) {
+    throw new Error("MISSING_API_KEY: The Gemini API key is not configured in the environment. Please add API_KEY to your .env file or environment variables.");
+  }
+  return new GoogleGenAI({ apiKey });
+}
 
 const SYSTEM_PROMPT = `
-You are StudyPlanOS, an autonomous academic logistics engine. 
-You are NOT a chatbot. You generate high-precision, structured study schedules.
+You are the StudyPlanOS Academic Intelligence Core. You are an elite academic strategist designed to optimize student performance across an entire semester.
 
-DISTRIBUTION PROTOCOLS:
-1. FULL COVERAGE: You must generate sessions for EVERY week between START_DATE and END_DATE. 
-2. WEEKLY DISTRIBUTION: Do not cluster all tasks in the middle of the week unless the variant specifically asks for it.
-3. WEEKEND-HEAVY LOGIC: Shift 70-80% of the total weekly study hours to Friday, Saturday, and Sunday. Weekdays (Mon-Thu) should only contain light review or administrative tasks.
-4. BALANCED LOGIC: Distribute hours as evenly as possible across all 7 days of the week.
-5. NO-STUDY DAYS: Strictly respect user-defined no-study days by leaving those dates completely empty in the 'sessions' array.
+CORE STRATEGIC MISSION:
+1. SEMESTER CHRONOLOGY: You MUST generate a plan that covers every single week from START_DATE to END_DATE. Week 1 begins exactly on START_DATE.
+2. SYLLABUS INTEGRATION: Take the "Weekly Topics" list and map exactly one topic block to each sequential week of the semester. Every task title MUST reflect actual course content from the provided syllabus.
+3. DOCTRINE RIGOR:
+   - "Weekend Warrior": This is an EXTREME concentration. All studying MUST happen ONLY on Saturday and Sunday. 
+     - Monday through Friday MUST have ZERO (0) tasks.
+     - Sat: 09:00-13:00 (Deep Focus) and 15:00-18:00 (Application). 
+     - Sun: 10:00-14:00 (Review/Finish). 
+   - "Balanced Mastery": 4 sessions/week (e.g., Mon, Tue, Thu, Sat).
+   - "Deadline-First": Heavy load in the 7 days preceding any assignment due date found in the syllabus.
+4. PEDAGOGICAL PHASES: For every week's topic, schedule: 1. "Content Absorption", 2. "Active Practice", 3. "Self-Testing".
+5. LIMITS: Total minutes/week MUST NOT exceed user's hoursPerWeek.
 
-JSON STRUCTURE RULES:
-- Provide exactly 4 distinct variants: "Balanced", "Deadline-First", "Morning-Heavy", "Weekend-Heavy".
-- Every session MUST have a valid YYYY-MM-DD date within the range.
-- Every task MUST have a reasoning string explaining why it's scheduled on that specific day.
+OUTPUT: Return 4 strategies. Each MUST have a 'rationale' explaining why that specific distribution was chosen for the student's constraints.
 `;
 
 const taskSchema = {
@@ -44,10 +55,10 @@ const sessionSchema = {
   type: Type.OBJECT,
   properties: {
     date: { type: Type.STRING },
+    time_block_label: { type: Type.STRING },
     start_time: { type: Type.STRING },
     end_time: { type: Type.STRING },
     planned_minutes: { type: Type.NUMBER },
-    time_block_label: { type: Type.STRING },
     tasks: { type: Type.ARRAY, items: taskSchema }
   },
   required: ["date", "start_time", "end_time", "planned_minutes", "tasks"]
@@ -67,9 +78,11 @@ const optionSchema = {
   type: Type.OBJECT,
   properties: {
     option_name: { type: Type.STRING },
+    rationale: { type: Type.STRING },
+    pedagogical_efficiency: { type: Type.NUMBER },
     study_plan: { type: Type.ARRAY, items: weekSchema }
   },
-  required: ["option_name", "study_plan"]
+  required: ["option_name", "rationale", "pedagogical_efficiency", "study_plan"]
 };
 
 const mainResponseSchema = {
@@ -98,31 +111,51 @@ const mainResponseSchema = {
   required: ["plan_horizon_weeks", "assumptions", "health_status", "schedule_options", "next_actions"]
 };
 
-export async function generateInitialPlan(constraints: UserConstraints): Promise<StudyPlanResponse> {
-  const prompt = `
-    TASK: GENERATE COMPREHENSIVE STUDY PLAN OPTIONS.
-    
-    TIMELINE: ${constraints.startDate} to ${constraints.deadlineDate}
-    MAX HOURS: ${constraints.hoursPerWeek} hrs/week
-    
-    ACADEMIC INPUTS:
-    - TOPICS: ${constraints.weeklyTopics}
-    - READINGS: ${constraints.readings}
-    - ASSIGNMENTS: ${constraints.assignments}
-    - GRADING: ${constraints.examsGrading}
-    
-    STUDENT CONSTRAINTS:
-    - PREFS: ${constraints.studentPreferences}
-    - FIXED COMMITMENTS (NO STUDY): ${constraints.fixedCommitments}
-    - ENERGY WINDOWS: ${constraints.preferredFocusHours}
-    
-    MANDATORY: 
-    1. For the "Weekend-Heavy" variant, ensure Saturday and Sunday are the primary study days (4-6 hours each), while Monday-Thursday have minimal or no tasks.
-    2. For the "Balanced" variant, distribute the ${constraints.hoursPerWeek} hours across at least 5-6 days per week.
-    3. Generate a complete schedule for every single week in the range. Do not truncate the timeline.
-  `;
+const syllabusExtractionSchema = {
+  type: Type.OBJECT,
+  properties: {
+    weeklyTopics: { type: Type.STRING },
+    readings: { type: Type.STRING },
+    assignments: { type: Type.STRING },
+    examsGrading: { type: Type.STRING },
+    importantDates: { type: Type.STRING },
+    deadline: { type: Type.STRING }
+  },
+  required: ["weeklyTopics", "assignments", "deadline"]
+};
 
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+export async function parseSyllabus(rawText: string): Promise<Partial<UserConstraints>> {
+  const ai = getAIClient();
+  const response = await ai.models.generateContent({
+    model: EXTRACTION_MODEL,
+    contents: `Extract structured course data from this raw syllabus text: \n\n${rawText}`,
+    config: {
+      systemInstruction: "Extract academic details precisely. Format 'weeklyTopics' as a line-separated list of Week 1, Week 2... etc. Extract the semester end date as 'deadline' in YYYY-MM-DD format.",
+      responseMimeType: "application/json",
+      responseSchema: syllabusExtractionSchema,
+    },
+  });
+  return JSON.parse(response.text || "{}");
+}
+
+export async function generateInitialPlan(constraints: UserConstraints): Promise<StudyPlanResponse> {
+  const ai = getAIClient();
+  const prompt = `
+    GENERATE FULL SEMESTER STUDY ARCHITECTURE:
+    START DATE: ${constraints.startDate}
+    END DATE: ${constraints.deadlineDate}
+    CAPACITY: ${constraints.hoursPerWeek} hours/week.
+    
+    REQUIRED SYLLABUS DATA:
+    1. Weekly Topics: ${constraints.weeklyTopics}
+    2. Assignments: ${constraints.assignments}
+    3. Readings: ${constraints.readings}
+    4. Exams: ${constraints.examsGrading}
+    5. Dates: ${constraints.importantDates}
+    
+    IMPORTANT: Map 'Weekly Topics' sequentially to EACH week. For 'Weekend Warrior', ensure Monday-Friday has 0 sessions.
+  `;
+  
   const response = await ai.models.generateContent({
     model: MODEL_NAME,
     contents: prompt,
@@ -134,13 +167,32 @@ export async function generateInitialPlan(constraints: UserConstraints): Promise
     },
   });
 
-  const text = response.text || "{}";
-  const result = JSON.parse(text.replace(/```json|```/g, "").trim());
-  
-  // Ensure we return exactly what the app expects
-  return result;
+  return JSON.parse(response.text || "{}");
+}
+
+export async function adjustPlanOS(currentPlan: StudyPlanResponse, command: string, constraints: UserConstraints): Promise<StudyPlanResponse> {
+  const ai = getAIClient();
+  const prompt = `
+    MODIFICATION COMMAND: "${command}"
+    Update the semester trajectory while keeping syllabus data synced.
+    Current state: ${JSON.stringify(currentPlan)}
+  `;
+
+  const response = await ai.models.generateContent({
+    model: MODEL_NAME,
+    contents: prompt,
+    config: {
+      systemInstruction: SYSTEM_PROMPT,
+      responseMimeType: "application/json",
+      responseSchema: mainResponseSchema,
+      thinkingConfig: { thinkingBudget: 24000 }
+    },
+  });
+
+  return JSON.parse(response.text || "{}");
 }
 
 export async function rebalancePlanOS(currentPlan: any, constraints: UserConstraints): Promise<StudyPlanResponse> {
   return generateInitialPlan(constraints);
 }
+
