@@ -1,6 +1,7 @@
 
 import React, { useState, useCallback } from 'react';
 import { UserConstraints } from '../types';
+import { parseSyllabus } from '../services/geminiService';
 
 interface Props {
   onPlanGenerated: (constraints: UserConstraints) => void;
@@ -20,36 +21,12 @@ const TEMPLATES = {
     preferredFocusHours: "9am - 12pm",
     hours: 12,
     deadline: "2025-12-20"
-  },
-  econ: {
-    weeklyTopics: "Market Equilibrium\nElasticity\nConsumer Theory\nProduction Functions\nMonopoly & Oligopoly",
-    readings: "Mankiw Microeconomics Ch 1-8\nWall Street Journal daily review",
-    assignments: "Problem Set 1: Supply/Demand Curves\nCase Study: Tech Monopolies",
-    examsGrading: "Problem Sets (20%)\nMidterm (35%)\nFinal (45%)",
-    importantDates: "Midterm: Nov 2\nFinal: Dec 18",
-    policies: "Collaboration encouraged on P-Sets.",
-    studentPreferences: "Weekend heavy learner. No study before 10am.",
-    fixedCommitments: "Club Meeting: Wed 7pm",
-    preferredFocusHours: "10am - 4pm",
-    hours: 10,
-    deadline: "2025-12-18"
-  },
-  bio: {
-    weeklyTopics: "Cell Structure\nMetabolism\nDNA Replication\nProtein Synthesis\nGenetics",
-    readings: "Campbell Biology Ch 4-12\nLab Manual Section 1-5",
-    assignments: "Lab Report 1: Osmosis\nDNA Modeling Project",
-    examsGrading: "Labs (25%)\nQuizzes (15%)\nFinal Exam (60%)",
-    importantDates: "Lab Quiz: Oct 20\nFinal: Dec 15",
-    policies: "Lab attendance is mandatory.",
-    studentPreferences: "Night owl. Strict Focus after 8pm.",
-    fixedCommitments: "Lab: Mon 2pm-5pm",
-    preferredFocusHours: "8pm - 11pm",
-    hours: 18,
-    deadline: "2025-12-15"
   }
 };
 
 export const SetupView: React.FC<Props> = ({ onPlanGenerated, isLoading }) => {
+  const [isExtracting, setIsExtracting] = useState(false);
+  const [rawSyllabus, setRawSyllabus] = useState('');
   const [formData, setFormData] = useState({
     weeklyTopics: '',
     readings: '',
@@ -66,16 +43,27 @@ export const SetupView: React.FC<Props> = ({ onPlanGenerated, isLoading }) => {
     deadline: ''
   });
 
+  const isKeyPresent = !!process.env.API_KEY && process.env.API_KEY !== 'undefined';
+
   const updateField = useCallback((field: string, value: any) => {
     setFormData(prev => ({ ...prev, [field]: value }));
   }, []);
 
-  const fillTemplate = (key: keyof typeof TEMPLATES) => {
-    const template = TEMPLATES[key];
-    setFormData(prev => ({
-      ...prev,
-      ...template
-    }));
+  const handleSmartExtract = async () => {
+    if (!rawSyllabus.trim()) return;
+    setIsExtracting(true);
+    try {
+      const extracted = await parseSyllabus(rawSyllabus);
+      setFormData(prev => ({
+        ...prev,
+        ...extracted
+      }));
+      setRawSyllabus('');
+    } catch (e: any) {
+      alert(e.message || "Extraction failed. Please ensure your API key is active.");
+    } finally {
+      setIsExtracting(false);
+    }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -136,24 +124,48 @@ export const SetupView: React.FC<Props> = ({ onPlanGenerated, isLoading }) => {
   return (
     <div className="max-w-5xl mx-auto py-4">
       <div className="mb-12 text-center space-y-3">
-        <div className="inline-block px-4 py-1.5 rounded-full border border-indigo-500/30 bg-indigo-500/10 text-indigo-400 text-[10px] font-black uppercase tracking-widest">Initialization Phase</div>
+        <div className="inline-flex items-center gap-3 px-4 py-1.5 rounded-full border border-indigo-500/30 bg-indigo-500/10">
+          <span className={`w-2 h-2 rounded-full ${isKeyPresent ? 'bg-emerald-500' : 'bg-rose-500 animate-pulse'}`}></span>
+          <span className="text-indigo-400 text-[10px] font-black uppercase tracking-widest">
+            {isKeyPresent ? "Neural Link Active" : "Neural Link Offline (Check API Key)"}
+          </span>
+        </div>
         <h2 className="text-5xl font-black text-white tracking-tighter uppercase italic leading-none">Agent Onboarding</h2>
-        
-        {/* QUICK TEMPLATES */}
-        <div className="pt-8 flex flex-wrap justify-center gap-3">
-          <p className="w-full text-[9px] font-black text-slate-600 uppercase tracking-widest mb-1">Quick-Fill Presets:</p>
-          <button type="button" onClick={() => fillTemplate('cs')} className="px-5 py-2 rounded-full border border-white/5 bg-white/5 text-[9px] font-black uppercase text-slate-400 hover:text-white hover:border-indigo-500/50 transition-all">Computer Science</button>
-          <button type="button" onClick={() => fillTemplate('econ')} className="px-5 py-2 rounded-full border border-white/5 bg-white/5 text-[9px] font-black uppercase text-slate-400 hover:text-white hover:border-indigo-500/50 transition-all">Microeconomics</button>
-          <button type="button" onClick={() => fillTemplate('bio')} className="px-5 py-2 rounded-full border border-white/5 bg-white/5 text-[9px] font-black uppercase text-slate-400 hover:text-white hover:border-indigo-500/50 transition-all">Biology Lab</button>
+      </div>
+
+      <div className="mb-16 relative group">
+        <div className="absolute -inset-1 bg-gradient-to-r from-indigo-500/20 to-purple-500/20 rounded-[3rem] blur opacity-75 group-hover:opacity-100 transition duration-1000"></div>
+        <div className="relative bg-[#0d0f17] border border-white/10 p-10 rounded-[3rem] space-y-6">
+          <div className="flex justify-between items-center">
+            <div className="space-y-1">
+              <h3 className="text-xl font-black text-white italic uppercase tracking-tighter flex items-center gap-3">
+                <span className="text-indigo-500">⚡</span> Intelligence Intake
+              </h3>
+              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Paste raw syllabus text to auto-populate the fields below.</p>
+            </div>
+            <button 
+              type="button"
+              disabled={isExtracting || !rawSyllabus || !isKeyPresent}
+              onClick={handleSmartExtract}
+              className="px-8 py-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-20 text-white text-[10px] font-black uppercase tracking-widest rounded-2xl transition-all shadow-xl shadow-indigo-600/20"
+            >
+              {isExtracting ? "Analyzing Neural Patterns..." : "Execute Smart Extract"}
+            </button>
+          </div>
+          <textarea 
+            value={rawSyllabus}
+            onChange={(e) => setRawSyllabus(e.target.value)}
+            placeholder="Copy and paste entire syllabus text here (Course schedule, grading, deadlines...)"
+            className="w-full h-40 bg-white/5 border border-white/5 rounded-[2rem] p-6 text-sm text-slate-300 font-medium outline-none focus:border-indigo-500/50 transition-all resize-none italic"
+          />
         </div>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-12 pb-20">
-        {/* SECTION 1: COURSE INTELLIGENCE */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 bg-white/[0.02] border border-white/5 p-8 rounded-[3rem]">
           <div className="lg:col-span-4 space-y-2">
             <h3 className="text-xl font-black text-white italic uppercase tracking-tighter">01. Academic Data</h3>
-            <p className="text-[10px] font-bold text-slate-500 leading-relaxed uppercase tracking-widest">The agent analyzes grade weights to prioritize high-impact sessions.</p>
+            <p className="text-[10px] font-bold text-slate-500 leading-relaxed uppercase tracking-widest">Grade weights to prioritize high-impact sessions.</p>
           </div>
           <div className="lg:col-span-8 grid md:grid-cols-2 gap-8">
             {renderField("Weekly Topics", "weeklyTopics", "List modules or weekly focus...")}
@@ -163,20 +175,17 @@ export const SetupView: React.FC<Props> = ({ onPlanGenerated, isLoading }) => {
           </div>
         </div>
 
-        {/* SECTION 2: CALENDAR CONFLICTS */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 bg-white/[0.02] border border-white/5 p-8 rounded-[3rem]">
           <div className="lg:col-span-4 space-y-2">
             <h3 className="text-xl font-black text-white italic uppercase tracking-tighter">02. Fixed Reality</h3>
             <p className="text-[10px] font-bold text-slate-500 leading-relaxed uppercase tracking-widest">The agent will never schedule study during these times.</p>
           </div>
           <div className="lg:col-span-8 space-y-8">
-            {renderField("Weekly Fixed Commitments", "fixedCommitments", "Mon: 9am–10:15am Math 231\nTue: 2pm–5pm Golf practice\nWed: 6pm-9pm Work shift")}
-            {renderField("Energy Windows & Sleep", "preferredFocusHours", "Best focus: Morning (9am–12pm)\nAvoid studying after 9pm\nNo-study days: Sunday")}
-            {renderField("AI Override Protocol", "allowOverride", "Allow AI to use non-preferred hours if deadlines are < 48h away", "checkbox")}
+            {renderField("Weekly Fixed Commitments", "fixedCommitments", "Mon: 9am–10:15am Math 231...")}
+            {renderField("Energy Windows", "preferredFocusHours", "Best focus: Morning (9am–12pm)...")}
           </div>
         </div>
 
-        {/* SECTION 3: DEPLOYMENT SETTINGS */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 bg-white/[0.02] border border-white/5 p-8 rounded-[3rem]">
           <div className="lg:col-span-4 space-y-2">
             <h3 className="text-xl font-black text-white italic uppercase tracking-tighter">03. Activation</h3>
@@ -191,14 +200,15 @@ export const SetupView: React.FC<Props> = ({ onPlanGenerated, isLoading }) => {
 
         <button 
           type="submit" 
-          disabled={isLoading}
+          disabled={isLoading || !isKeyPresent}
           className="group relative w-full overflow-hidden py-8 bg-indigo-600 text-white font-black uppercase tracking-[0.5em] rounded-[2.5rem] shadow-2xl shadow-indigo-600/20 hover:bg-indigo-500 transition-all active:scale-[0.98] disabled:opacity-50"
         >
           <div className="relative z-10 flex items-center justify-center gap-4">
-            {isLoading ? "Syncing Logic..." : "Deploy StudyPlan OS"}
+            {isLoading ? "Syncing Logic..." : isKeyPresent ? "Deploy StudyPlan OS" : "API Key Required to Proceed"}
           </div>
         </button>
       </form>
     </div>
   );
 };
+
