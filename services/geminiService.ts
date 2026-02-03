@@ -13,23 +13,26 @@ function getAIClient() {
   return new GoogleGenAI({ apiKey });
 }
 
+function calculateTotalWeeks(start: string, end: string): number {
+  const startDate = new Date(start);
+  const endDate = new Date(end);
+  const diffTime = Math.abs(endDate.getTime() - startDate.getTime());
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  return Math.ceil(diffDays / 7) || 1;
+}
+
 const SYSTEM_PROMPT = `
 You are the StudyPlanOS Academic Intelligence Core. You are an elite academic strategist designed to optimize student performance across an entire semester.
 
 CORE STRATEGIC MISSION:
-1. SEMESTER CHRONOLOGY: You MUST generate a plan that covers every single week from START_DATE to END_DATE. Week 1 begins exactly on START_DATE.
-2. SYLLABUS INTEGRATION: Take the "Weekly Topics" list and map exactly one topic block to each sequential week of the semester. Every task title MUST reflect actual course content from the provided syllabus.
+1. FULL SEMESTER CHRONOLOGY: You MUST generate a plan that covers EVERY SINGLE WEEK from the provided START_DATE to END_DATE. If the duration is 15 weeks, you MUST provide 15 week objects. DO NOT TRUNCATE.
+2. SYLLABUS INTEGRATION: Take the "Weekly Topics" list and map topic blocks to each sequential week. Every task title MUST reflect actual course content.
 3. DOCTRINE RIGOR:
-   - "Weekend Warrior": This is an EXTREME concentration. All studying MUST happen ONLY on Saturday and Sunday. 
-     - Monday through Friday MUST have ZERO (0) tasks.
-     - Sat: 09:00-13:00 (Deep Focus) and 15:00-18:00 (Application). 
-     - Sun: 10:00-14:00 (Review/Finish). 
+   - "Weekend Warrior": STUDY ONLY on Sat/Sun. Mon-Fri MUST have 0 tasks.
    - "Balanced Mastery": 4 sessions/week (e.g., Mon, Tue, Thu, Sat).
-   - "Deadline-First": Heavy load in the 7 days preceding any assignment due date found in the syllabus.
-4. PEDAGOGICAL PHASES: For every week's topic, schedule: 1. "Content Absorption", 2. "Active Practice", 3. "Self-Testing".
-5. LIMITS: Total minutes/week MUST NOT exceed user's hoursPerWeek.
-
-OUTPUT: Return 4 strategies. Each MUST have a 'rationale' explaining why that specific distribution was chosen for the student's constraints.
+   - "Deadline-First": Heavy load in the 7 days preceding any assignment due date.
+4. PEDAGOGICAL PHASES: For every week, schedule: 1. "Content Absorption", 2. "Active Practice", 3. "Self-Testing".
+5. NO TRUNCATION: You are strictly forbidden from saying "continue for remaining weeks". You must provide the full JSON array for the entire timeline.
 `;
 
 const taskSchema = {
@@ -140,20 +143,23 @@ export async function parseSyllabus(rawText: string): Promise<Partial<UserConstr
 
 export async function generateInitialPlan(constraints: UserConstraints): Promise<StudyPlanResponse> {
   const ai = getAIClient();
+  const totalWeeks = calculateTotalWeeks(constraints.startDate, constraints.deadlineDate);
+  
   const prompt = `
-    GENERATE FULL SEMESTER STUDY ARCHITECTURE:
-    START DATE: ${constraints.startDate}
-    END DATE: ${constraints.deadlineDate}
-    CAPACITY: ${constraints.hoursPerWeek} hours/week.
+    GENERATE COMPLETE SEMESTER ARCHITECTURE:
+    - START DATE: ${constraints.startDate}
+    - END DATE: ${constraints.deadlineDate}
+    - TOTAL WEEKS TO GENERATE: ${totalWeeks} (CRITICAL: You MUST provide exactly ${totalWeeks} entries in the study_plan array).
+    - CAPACITY: ${constraints.hoursPerWeek} hours/week.
     
-    REQUIRED SYLLABUS DATA:
+    SYLLABUS DATA:
     1. Weekly Topics: ${constraints.weeklyTopics}
     2. Assignments: ${constraints.assignments}
     3. Readings: ${constraints.readings}
     4. Exams: ${constraints.examsGrading}
     5. Dates: ${constraints.importantDates}
     
-    IMPORTANT: Map 'Weekly Topics' sequentially to EACH week. For 'Weekend Warrior', ensure Monday-Friday has 0 sessions.
+    REQUIREMENT: Map the provided 'Weekly Topics' sequentially across the ${totalWeeks} weeks. If there are fewer topics than weeks, allocate the final weeks for "Comprehensive Final Review" and "Final Project Completion".
   `;
   
   const response = await ai.models.generateContent({
@@ -172,9 +178,11 @@ export async function generateInitialPlan(constraints: UserConstraints): Promise
 
 export async function adjustPlanOS(currentPlan: StudyPlanResponse, command: string, constraints: UserConstraints): Promise<StudyPlanResponse> {
   const ai = getAIClient();
+  const totalWeeks = calculateTotalWeeks(constraints.startDate, constraints.deadlineDate);
+  
   const prompt = `
     MODIFICATION COMMAND: "${command}"
-    Update the semester trajectory while keeping syllabus data synced.
+    Maintain the full ${totalWeeks}-week trajectory.
     Current state: ${JSON.stringify(currentPlan)}
   `;
 
@@ -195,4 +203,5 @@ export async function adjustPlanOS(currentPlan: StudyPlanResponse, command: stri
 export async function rebalancePlanOS(currentPlan: any, constraints: UserConstraints): Promise<StudyPlanResponse> {
   return generateInitialPlan(constraints);
 }
+
 
