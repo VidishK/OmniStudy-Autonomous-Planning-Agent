@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Layout } from './components/Layout';
 import { SetupView } from './components/SetupView';
@@ -189,4 +188,5 @@ const App: React.FC = () => {
 };
 
 export default App;
+
 
