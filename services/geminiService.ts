@@ -203,5 +203,3 @@ export async function adjustPlanOS(currentPlan: StudyPlanResponse, command: stri
 export async function rebalancePlanOS(currentPlan: any, constraints: UserConstraints): Promise<StudyPlanResponse> {
   return generateInitialPlan(constraints);
 }
-
-
