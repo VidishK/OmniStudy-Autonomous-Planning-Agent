@@ -1,4 +1,3 @@
-
 import React, { useState, useCallback } from 'react';
 import { UserConstraints } from '../types';
 import { parseSyllabus } from '../services/geminiService';
@@ -7,22 +6,6 @@ interface Props {
   onPlanGenerated: (constraints: UserConstraints) => void;
   isLoading: boolean;
 }
-
-const TEMPLATES = {
-  cs: {
-    weeklyTopics: "Week 1: Big O & Arrays\nWeek 2: Linked Lists\nWeek 3: Stacks & Queues\nWeek 4: Hash Tables\nWeek 5: Recursion & Trees",
-    readings: "CLRS Chapter 1-10\nOptional: Cracking the Coding Interview",
-    assignments: "Lab 1: Array Reversal (Due W2)\nLab 2: Queue Implementation (Due W4)\nMidterm Project (Due W6)",
-    examsGrading: "Weekly Quizzes (10%)\nMidterm Exam (30%)\nFinal Project (60%)",
-    importantDates: "Midterm: Oct 15\nFinal Project Due: Dec 12",
-    policies: "No late submissions. Standard academic integrity applies.",
-    studentPreferences: "Morning focused. Avoid studying Friday evenings.",
-    fixedCommitments: "Gym: Mon/Wed/Fri 7am-8am\nWork: Tue/Thu 4pm-8pm",
-    preferredFocusHours: "9am - 12pm",
-    hours: 12,
-    deadline: "2025-12-20"
-  }
-};
 
 export const SetupView: React.FC<Props> = ({ onPlanGenerated, isLoading }) => {
   const [isExtracting, setIsExtracting] = useState(false);
@@ -43,7 +26,7 @@ export const SetupView: React.FC<Props> = ({ onPlanGenerated, isLoading }) => {
     deadline: ''
   });
 
-  const isKeyPresent = !!process.env.API_KEY && process.env.API_KEY !== 'undefined';
+  const isKeyPresent = !!process.env.API_KEY && process.env.API_KEY !== 'undefined' && process.env.API_KEY.length > 5;
 
   const updateField = useCallback((field: string, value: any) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -155,7 +138,7 @@ export const SetupView: React.FC<Props> = ({ onPlanGenerated, isLoading }) => {
           <textarea 
             value={rawSyllabus}
             onChange={(e) => setRawSyllabus(e.target.value)}
-            placeholder="Copy and paste entire syllabus text here (Course schedule, grading, deadlines...)"
+            placeholder="Copy and paste entire syllabus text here..."
             className="w-full h-40 bg-white/5 border border-white/5 rounded-[2rem] p-6 text-sm text-slate-300 font-medium outline-none focus:border-indigo-500/50 transition-all resize-none italic"
           />
         </div>
@@ -165,31 +148,20 @@ export const SetupView: React.FC<Props> = ({ onPlanGenerated, isLoading }) => {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 bg-white/[0.02] border border-white/5 p-8 rounded-[3rem]">
           <div className="lg:col-span-4 space-y-2">
             <h3 className="text-xl font-black text-white italic uppercase tracking-tighter">01. Academic Data</h3>
-            <p className="text-[10px] font-bold text-slate-500 leading-relaxed uppercase tracking-widest">Grade weights to prioritize high-impact sessions.</p>
+            <p className="text-[10px] font-bold text-slate-500 leading-relaxed uppercase tracking-widest">Core syllabus inputs.</p>
           </div>
           <div className="lg:col-span-8 grid md:grid-cols-2 gap-8">
-            {renderField("Weekly Topics", "weeklyTopics", "List modules or weekly focus...")}
-            {renderField("Exams & Weights", "examsGrading", "Final Exam (40%), Project (20%)...")}
-            {renderField("Readings", "readings", "Textbooks, research papers...")}
-            {renderField("Assignments", "assignments", "HW 1, Case Study, Lab Reports...")}
+            {renderField("Weekly Topics", "weeklyTopics", "Module 1, Module 2...")}
+            {renderField("Exams & Weights", "examsGrading", "Weights and grading...")}
+            {renderField("Readings", "readings", "Reading list...")}
+            {renderField("Assignments", "assignments", "Homework and labs...")}
           </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 bg-white/[0.02] border border-white/5 p-8 rounded-[3rem]">
           <div className="lg:col-span-4 space-y-2">
-            <h3 className="text-xl font-black text-white italic uppercase tracking-tighter">02. Fixed Reality</h3>
-            <p className="text-[10px] font-bold text-slate-500 leading-relaxed uppercase tracking-widest">The agent will never schedule study during these times.</p>
-          </div>
-          <div className="lg:col-span-8 space-y-8">
-            {renderField("Weekly Fixed Commitments", "fixedCommitments", "Mon: 9am–10:15am Math 231...")}
-            {renderField("Energy Windows", "preferredFocusHours", "Best focus: Morning (9am–12pm)...")}
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 bg-white/[0.02] border border-white/5 p-8 rounded-[3rem]">
-          <div className="lg:col-span-4 space-y-2">
-            <h3 className="text-xl font-black text-white italic uppercase tracking-tighter">03. Activation</h3>
-            <p className="text-[10px] font-bold text-slate-500 leading-relaxed uppercase tracking-widest">Global limits for the planning algorithm.</p>
+            <h3 className="text-xl font-black text-white italic uppercase tracking-tighter">02. Activation</h3>
+            <p className="text-[10px] font-bold text-slate-500 leading-relaxed uppercase tracking-widest">Scheduling constraints.</p>
           </div>
           <div className="lg:col-span-8 grid md:grid-cols-3 gap-6">
             {renderField("Max Hours / Wk", "hours", "15", "number")}
@@ -203,12 +175,11 @@ export const SetupView: React.FC<Props> = ({ onPlanGenerated, isLoading }) => {
           disabled={isLoading || !isKeyPresent}
           className="group relative w-full overflow-hidden py-8 bg-indigo-600 text-white font-black uppercase tracking-[0.5em] rounded-[2.5rem] shadow-2xl shadow-indigo-600/20 hover:bg-indigo-500 transition-all active:scale-[0.98] disabled:opacity-50"
         >
-          <div className="relative z-10 flex items-center justify-center gap-4">
-            {isLoading ? "Syncing Logic..." : isKeyPresent ? "Deploy StudyPlan OS" : "API Key Required to Proceed"}
-          </div>
+          {isLoading ? "Syncing Logic..." : isKeyPresent ? "Deploy StudyPlan OS" : "API Key Required"}
         </button>
       </form>
     </div>
   );
 };
+
 
